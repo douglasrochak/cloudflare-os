@@ -1,6 +1,7 @@
 import { CodexConnection } from "./codex-auth.js";
 import type { CodexLogin, CodexConnectionStatus } from "@gadgets/workshop-shared/api";
-import { OPENAI_CODEX_MODELS } from "@earendil-works/pi-ai/providers/openai-codex.models";
+import { CODEX_MODELS, codexReasoningLevels, validateCodexReasoning } from "./codex-models.js";
+import type { CodexReasoningEffort } from "@gadgets/workshop-shared/api";
 import type { CodexModelConfig } from "./ai-models.js";
 import { RpcStub } from "capnweb";
 import { GadgetMetadataWithTimestamps, AiChatAuthorInfo, AiModelConfig, SUGGESTED_MODELS, CollaboratorRole, ConnectedAccountsSubscriber, ConnectedAccountsFilter, GatekeeperVendorFilter, GadgetMetadata, BlueprintMetadata, BlueprintLibrarySummary, BlueprintSource, BlueprintUserSummary, BLUEPRINT_SCREENSHOT_R2_PREFIX, GatekeeperVendorInfo, BlueprintOutput, OutputSummary, WorkpieceId, ListOutputsResult, AUTH_ERROR_CODES, createAuthError } from '@gadgets/workshop-shared/api';
@@ -562,15 +563,16 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   async getCodexConnection(): Promise<CodexConnectionStatus> {
     const status = await this.#codex.status();
     return { ...status, models: status.connected
-      ? Object.values(OPENAI_CODEX_MODELS).map(model => ({ id: model.id, name: model.name })) : [] };
+      ? Object.values(CODEX_MODELS).map(model => ({ id: model.id, name: model.name, reasoningLevels: codexReasoningLevels(model.id) })) : [] };
   }
-  async addCodexModel(modelId: string): Promise<void> {
-    const model = Object.values(OPENAI_CODEX_MODELS).find(candidate => candidate.id === modelId);
+  async addCodexModel(modelId: string, reasoningEffort?: CodexReasoningEffort): Promise<void> {
+    const model = Object.values(CODEX_MODELS).find(candidate => candidate.id === modelId);
     if (!model) throw new Error('Unknown Codex model. Choose one from the list.');
+    const effort = validateCodexReasoning(modelId, reasoningEffort);
     await this.#codex.accessToken();
     this.storage.aiModels.put({
-      profile: { type: 'agent', id: `codex:${model.id}`, name: `${model.name} (Codex)` },
-      config: { provider: 'openai-codex', model: model.id, apiToken: '' },
+      profile: { type: 'agent', id: `codex:${model.id}:${effort}`, name: `${model.name} (Codex · ${effort})` },
+      config: { provider: 'openai-codex', model: model.id, apiToken: '', reasoningEffort: effort },
     });
   }
   async disconnectCodex(): Promise<void> {

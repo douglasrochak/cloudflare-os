@@ -1,7 +1,8 @@
 import { codexAccountId } from "./codex-auth.js";
 import type { CodexTokenSource } from "./user.js";
 import { stream as codexStream } from "@earendil-works/pi-ai/api/openai-codex-responses";
-import { OPENAI_CODEX_MODELS } from "@earendil-works/pi-ai/providers/openai-codex.models";
+import { CODEX_MODELS, checkCodexResponse, validateCodexReasoning } from "./codex-models.js";
+import type { CodexReasoningEffort } from "@gadgets/workshop-shared/api";
 import { DurableObject, RpcStub, RpcTarget } from "cloudflare:workers";
 import { validateRpc } from "capnweb-validate";
 import type {
@@ -264,6 +265,7 @@ function getHeader(headers: Record<string, string>, name: string): string | unde
 }
 
 type HandleArgs = {
+  reasoningEffort?: CodexReasoningEffort;
   model: Model<Api>;
   // Provider auth: a plain API key (pi turns it into the SDK's native auth) and/or headers.
   // A null header value suppresses a default header ({Authorization: null, "x-api-key": null}
@@ -303,7 +305,7 @@ function makeHandle(args: HandleArgs): ModelHandle {
       args.model.api === "anthropic-messages"
           ? (anthropicCompat?.forceAdaptiveThinking === true ? { thinkingEnabled: true } : {}) :
       args.model.api === "openai-responses" ? { reasoningEffort: "medium" } :
-      args.model.api === "openai-codex-responses" ? { reasoningEffort: "medium" } : {};
+      args.model.api === "openai-codex-responses" ? { reasoningEffort: args.reasoningEffort ?? "medium" } : {};
 
   const handle: ModelHandle = {
     model: args.model,
@@ -368,11 +370,12 @@ export function getModel(env: Cloudflare.Env, config: CodexModelConfig,
                          initiator: AiChatAuthorInfo,
                          options: ModelRoutingOptions = {}): ModelHandle {
   if (config.provider === 'openai-codex') {
-    const model = (OPENAI_CODEX_MODELS as Record<string, Model<Api>>)[config.model];
+    const model = Object.hasOwn(CODEX_MODELS, config.model) ? CODEX_MODELS[config.model] : undefined;
     if (!model || !config.codexAuth) throw new Error('Reconnect your ChatGPT / Codex account in Add AI Model.');
     const source = config.codexAuth;
     return makeHandle({
       model: { ...model, baseUrl: 'https://chatgpt.com/backend-api' },
+      reasoningEffort: validateCodexReasoning(config.model, config.reasoningEffort),
       apiKey: config.apiToken,
       sessionAffinity: options.sessionAffinity,
       // Renew on every HTTP request, including long-running turns and persistent model bindings.
@@ -387,7 +390,7 @@ export function getModel(env: Cloudflare.Env, config: CodexModelConfig,
         request.headers.set('chatgpt-account-id', codexAccountId(token));
         const response = await fetch(new Request(request, { redirect: 'manual' }));
         if (response.status >= 300 && response.status < 400) throw new Error('Unexpected Codex redirect.');
-        return response;
+        return checkCodexResponse(response);
       },
     });
   }

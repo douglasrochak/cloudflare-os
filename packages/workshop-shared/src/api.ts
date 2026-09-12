@@ -396,7 +396,7 @@ export interface AuthenticatedApi extends RpcTarget {
   /** Returns connection state and supported models without credentials. */
   getCodexConnection(): Promise<CodexConnectionStatus>;
   /** Adds a catalog model using the current user's connected Codex account. */
-  addCodexModel(modelId: string): Promise<void>;
+  addCodexModel(modelId: string, reasoningEffort?: CodexReasoningEffort): Promise<void>;
   /** Removes the local Codex grant and this user's Codex model entries. */
   disconnectCodex(): Promise<void>;
 
@@ -1159,12 +1159,15 @@ export type CodexLogin = {
   expiresAt: number;
 };
 
+/** Reasoning levels supported by the direct Codex inference adapter. */
+export type CodexReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
 /** Non-secret connection state for the authenticated user's Codex account. */
 export type CodexConnectionStatus = {
   /** Whether a locally stored grant exists. */
   connected: boolean;
   /** Models available in the bundled Codex catalog, subject to the user's plan. */
-  models?: { id: string; name: string }[];
+  models?: { id: string; name: string; reasoningLevels: CodexReasoningEffort[] }[];
 };
 
 /** Supported AI providers. */
@@ -1188,6 +1191,9 @@ export type AiModelConfig = {
 
   /** Secret API token for the respective provider, for billing purposes. */
   apiToken: string;
+
+  /** Saved reasoning effort for a Codex model; defaults to medium for existing models. */
+  reasoningEffort?: CodexReasoningEffort;
 
   /**
    * Cloudflare account ID owning the Workers AI deployment the token authorizes. Required for

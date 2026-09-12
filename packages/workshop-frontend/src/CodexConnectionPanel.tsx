@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button, Select } from '@cloudflare/kumo'
 import type { RpcStub } from 'capnweb'
-import type { AuthenticatedApi, CodexConnectionStatus, CodexLogin } from '@gadgets/workshop-shared/api'
+import type { AuthenticatedApi, CodexConnectionStatus, CodexLogin, CodexReasoningEffort } from '@gadgets/workshop-shared/api'
 
 /** Connects the current user's subscription without exposing OAuth tokens to the browser. */
 export default function CodexConnectionPanel({ api, onSuccess, onBack }: {
@@ -12,6 +12,7 @@ export default function CodexConnectionPanel({ api, onSuccess, onBack }: {
   const [status, setStatus] = useState<CodexConnectionStatus | null>(null)
   const [login, setLogin] = useState<CodexLogin | null>(null)
   const [model, setModel] = useState('')
+  const [reasoning, setReasoning] = useState<CodexReasoningEffort>('medium')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const mounted = useRef(true)
@@ -81,7 +82,7 @@ export default function CodexConnectionPanel({ api, onSuccess, onBack }: {
     setBusy(true)
     setError('')
     try {
-      await api.addCodexModel(model)
+      await api.addCodexModel(model, reasoning)
       if (mounted.current) onSuccess()
     } catch (err) {
       if (mounted.current) setError(err instanceof Error ? err.message : 'Could not add this model. Try again.')
@@ -126,10 +127,16 @@ export default function CodexConnectionPanel({ api, onSuccess, onBack }: {
         <p className="text-sm">ChatGPT / Codex connected.</p>
         <Select label="Codex model" className="w-full" value={model || undefined}
           renderValue={value => status.models?.find(item => item.id === value)?.name ?? String(value)}
-          placeholder="Choose a model…" onValueChange={value => setModel(String(value))}>
+          placeholder="Choose a model…" onValueChange={value => { setModel(String(value)); setReasoning('medium') }}>
           {status.models?.map(item => <Select.Option key={item.id} value={item.id}>{item.name}</Select.Option>)}
         </Select>
-        <p className="text-sm text-kumo-subtle">Model availability depends on your account.</p>
+        {model && <Select label="Reasoning level" className="w-full" value={reasoning}
+          onValueChange={value => setReasoning(value as CodexReasoningEffort)}>
+          {(status.models?.find(item => item.id === model)?.reasoningLevels ?? ['low', 'medium', 'high', 'xhigh']).map(level =>
+            <Select.Option key={level} value={level}>{level}</Select.Option>)}
+        </Select>}
+        <p className="text-sm text-kumo-subtle">Higher reasoning levels can take longer and use more of your plan. Each model and level is saved as a separate choice in chat.</p>
+        <p className="text-sm text-kumo-subtle">This is a supported-model catalog, not a live list of your account entitlements. Availability depends on your plan.</p>
         <Button variant="secondary" onClick={disconnect} disabled={busy}>Disconnect Codex</Button>
         <p className="text-xs text-kumo-subtle">Disconnecting removes your saved Codex models. Requests already running may finish.</p>
       </div>}

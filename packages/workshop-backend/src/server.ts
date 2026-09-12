@@ -1,3 +1,4 @@
+import type { CodexReasoningEffort } from "@gadgets/workshop-shared/api";
 import { RpcStub, RpcTarget, newHttpBatchRpcResponse, newWebSocketRpcSession, RpcSessionOptions } from "capnweb";
 import { validateRpc } from "capnweb-validate";
 import type { JWTPayload } from "jose";
@@ -136,7 +137,7 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
   pollCodexLogin(loginId: string) { return this.#user.pollCodexLogin(loginId); }
   cancelCodexLogin(loginId: string) { return this.#user.cancelCodexLogin(loginId); }
   getCodexConnection() { return this.#user.getCodexConnection(); }
-  addCodexModel(modelId: string) { return this.#user.addCodexModel(modelId); }
+  addCodexModel(modelId: string, reasoningEffort?: CodexReasoningEffort) { return this.#user.addCodexModel(modelId, reasoningEffort); }
   disconnectCodex() { return this.#user.disconnectCodex(); }
   addModel(profile: AiChatAuthorInfo, config: AiModelConfig): Promise<void> {
     return this.#user.addModel(profile, config);
