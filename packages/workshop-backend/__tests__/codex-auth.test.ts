@@ -20,6 +20,17 @@ function device() {
 function tokens() { return Response.json({ access_token: access, refresh_token: 'private-refresh', expires_in: 3600 }); }
 
 describe('Codex device authorization', () => {
+  it('does not call fetch with the connection as its receiver', async () => {
+    const { storage } = setup();
+    const request = async function(this: unknown) {
+      // Native Worker fetch rejects an arbitrary class instance as `this`.
+      expect(this).toBeUndefined();
+      return device();
+    };
+    const connection = new CodexConnection(storage, request);
+    expect((await connection.start()).userCode).toBe('ABCD-EFGH');
+  });
+
   it('reuses a pending login and never exposes its private ID', async () => {
     const { connection, request } = setup();
     request.mockResolvedValueOnce(device());

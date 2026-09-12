@@ -42,7 +42,9 @@ export class CodexConnection {
 
   async #post(path: string, body: object | URLSearchParams): Promise<Response> {
     try {
-      return await this.request(`${AUTH}${path}`, {
+      // Native Worker fetch must not receive this CodexConnection as its `this` value.
+      const request = this.request;
+      return await request(`${AUTH}${path}`, {
         method: 'POST',
         headers: { 'Content-Type': body instanceof URLSearchParams
             ? 'application/x-www-form-urlencoded' : 'application/json' },
