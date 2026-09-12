@@ -1,3 +1,7 @@
+import { CodexConnection } from "./codex-auth.js";
+import type { CodexLogin, CodexConnectionStatus } from "@gadgets/workshop-shared/api";
+import { OPENAI_CODEX_MODELS } from "@earendil-works/pi-ai/providers/openai-codex.models";
+import type { CodexModelConfig } from "./ai-models.js";
 import { RpcStub } from "capnweb";
 import { GadgetMetadataWithTimestamps, AiChatAuthorInfo, AiModelConfig, SUGGESTED_MODELS, CollaboratorRole, ConnectedAccountsSubscriber, ConnectedAccountsFilter, GatekeeperVendorFilter, GadgetMetadata, BlueprintMetadata, BlueprintLibrarySummary, BlueprintSource, BlueprintUserSummary, BLUEPRINT_SCREENSHOT_R2_PREFIX, GatekeeperVendorInfo, BlueprintOutput, OutputSummary, WorkpieceId, ListOutputsResult, AUTH_ERROR_CODES, createAuthError } from '@gadgets/workshop-shared/api';
 import { Gatekeeper, GatekeeperUser, GatekeeperUserVerifier, GatekeeperVendor, AccountDescription, VendorDescription, GatekeeperConnectCallback, SupportedResource, ResourceConfiguratorFrame, AppUiContext, GatekeeperUiFrame } from "@gadgets/workshop-shared/gatekeeper";
@@ -280,6 +284,8 @@ async function checkGatekeeperVendorFilter(
 
 /** Durable Object that stores information about a user. */
 export class UserDurableObject extends DurableObject<Cloudflare.Env> {
+  #codex = new CodexConnection(this.ctx.storage);
+
   private storage: UserStorage;
   private vendors: Map<string, Service<GatekeeperVendor>>;
   private adminSettings: DurableObjectNamespace<AdminSettings>;
@@ -547,7 +553,39 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     return result;
   }
 
+  async startCodexLogin(): Promise<CodexLogin> { return this.#codex.start(); }
+  async pollCodexLogin(loginId: string): Promise<CodexConnectionStatus> {
+    const status = await this.#codex.poll(loginId);
+    return status.connected ? this.getCodexConnection() : status;
+  }
+  async cancelCodexLogin(loginId: string): Promise<void> { await this.#codex.cancel(loginId); }
+  async getCodexConnection(): Promise<CodexConnectionStatus> {
+    const status = await this.#codex.status();
+    return { ...status, models: status.connected
+      ? Object.values(OPENAI_CODEX_MODELS).map(model => ({ id: model.id, name: model.name })) : [] };
+  }
+  async addCodexModel(modelId: string): Promise<void> {
+    const model = Object.values(OPENAI_CODEX_MODELS).find(candidate => candidate.id === modelId);
+    if (!model) throw new Error('Unknown Codex model. Choose one from the list.');
+    await this.#codex.accessToken();
+    this.storage.aiModels.put({
+      profile: { type: 'agent', id: `codex:${model.id}`, name: `${model.name} (Codex)` },
+      config: { provider: 'openai-codex', model: model.id, apiToken: '' },
+    });
+  }
+  async disconnectCodex(): Promise<void> {
+    await this.#codex.disconnect();
+    for (const model of this.storage.aiModels.list()) {
+      if (model.config.provider === 'openai-codex') this.storage.aiModels.delete(model.profile.id);
+    }
+  }
+  /** Backend-only. Never forward this method through AuthenticatedApi. */
+  async getCodexAccessToken(): Promise<string> { return this.#codex.accessToken(); }
+
   async addModel(profile: AiChatAuthorInfo, config: AiModelConfig): Promise<void> {
+    if (config.provider === 'openai-codex') {
+      throw new Error('Use Connect ChatGPT / Codex to add a Codex model.');
+    }
     let gwConfig = getAiGatewayConfig(this.env);
     if (gwConfig && !gwConfig.providers.has(config.provider)) {
       throw new Error(`Provider "${config.provider}" is not available in AI Gateway mode.`);
@@ -722,6 +760,15 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
         }
       }
     }
+    // Only server-created model records receive the scoped token source. No refresh token leaves
+    // this User DO. The source is reused by streams and persistent gadget model bindings.
+    const attachCodex = async (config: AiModelConfig): Promise<CodexModelConfig> => {
+      if (config.provider !== 'openai-codex') return config;
+      return { ...config, apiToken: await this.#codex.accessToken(),
+        codexAuth: this.ctx.exports.CodexTokenSource({ props: { userId: this.ctx.id.toString() } }) };
+    };
+    if (result.aiModel) result.aiModel.config = await attachCodex(result.aiModel.config);
+    if (result.quickModel) result.quickModel = await attachCodex(result.quickModel);
     return result;
   }
 
@@ -1769,4 +1816,13 @@ export function normalizeUsername(username: string) {
   }
 
   return username;
+}
+
+/** Private, narrowly scoped capability used to renew a user's Codex access token during inference. */
+export class CodexTokenSource extends WorkerEntrypoint<Cloudflare.Env, { userId: string }> {
+  /** Returns a fresh token only to holders of this server-minted capability. */
+  async getAccessToken(): Promise<string> {
+    const users = this.ctx.exports.UserDurableObject;
+    return users.get(users.idFromString(this.ctx.props.userId)).getCodexAccessToken();
+  }
 }

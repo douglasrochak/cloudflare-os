@@ -4095,7 +4095,7 @@ class OverseerImpl implements AgentHooks {
       // (This runs inside the try so the `finally` below still clears the active-agent state and
       // emits a stream "clear" — otherwise the UI would spin forever on a block.)
       let byokRouting: UserGatewayRouting | undefined;
-      if (!callbackInitiated && this.ownerId) {
+      if (!callbackInitiated && this.ownerId && aiModel.config.provider !== "openai-codex") {
         let ownerStub = this.users.get(this.users.idFromString(this.ownerId));
         let usage = await checkUsageAndBalance(this.env, ownerStub);
         if (!usage.allowed) {

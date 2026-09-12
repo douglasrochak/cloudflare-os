@@ -1,3 +1,7 @@
+import { codexAccountId } from "./codex-auth.js";
+import type { CodexTokenSource } from "./user.js";
+import { stream as codexStream } from "@earendil-works/pi-ai/api/openai-codex-responses";
+import { OPENAI_CODEX_MODELS } from "@earendil-works/pi-ai/providers/openai-codex.models";
 import { DurableObject, RpcStub, RpcTarget } from "cloudflare:workers";
 import { validateRpc } from "capnweb-validate";
 import type {
@@ -118,6 +122,7 @@ function buildMetadata(initiator: AiChatAuthorInfo, context?: GatewayMetadataCon
 // `providers/all`, which drags ~30 providers into the bundle).
 const API_STREAMS: Record<string, StreamFunction<Api, SimpleStreamOptions>> = {
   "anthropic-messages": anthropicMessagesStream as StreamFunction<Api, SimpleStreamOptions>,
+  "openai-codex-responses": codexStream as StreamFunction<Api, SimpleStreamOptions>,
   "openai-responses": openaiResponsesStream as StreamFunction<Api, SimpleStreamOptions>,
   "openai-completions": openaiCompletionsStream as StreamFunction<Api, SimpleStreamOptions>,
   "google-generative-ai": googleGenerativeAiStream as StreamFunction<Api, SimpleStreamOptions>,
@@ -297,7 +302,8 @@ function makeHandle(args: HandleArgs): ModelHandle {
   const apiExtras: Record<string, unknown> =
       args.model.api === "anthropic-messages"
           ? (anthropicCompat?.forceAdaptiveThinking === true ? { thinkingEnabled: true } : {}) :
-      args.model.api === "openai-responses" ? { reasoningEffort: "medium" } : {};
+      args.model.api === "openai-responses" ? { reasoningEffort: "medium" } :
+      args.model.api === "openai-codex-responses" ? { reasoningEffort: "medium" } : {};
 
   const handle: ModelHandle = {
     model: args.model,
@@ -341,11 +347,16 @@ function makeHandle(args: HandleArgs): ModelHandle {
           return bridgePdfAttachments(args.model.api, replaced ?? payload) ?? replaced;
         },
       };
-      return streamFn(model, context, merged);
+      // Workers uses fetch/SSE; the pi Node WebSocket path is not a Worker transport.
+      return streamFn(model, context, args.model.api === 'openai-codex-responses'
+        ? { ...merged, transport: 'sse' } : merged);
     },
   };
   return handle;
 }
+
+/** Server-only capability attached when resolving the owner's stored Codex model. */
+export type CodexModelConfig = AiModelConfig & { codexAuth?: Service<CodexTokenSource> };
 
 /**
  * Resolve an AiModelConfig to a ModelHandle, choosing among three routing modes: the user's own
@@ -353,9 +364,33 @@ function makeHandle(args: HandleArgs): ModelHandle {
  * access with the config's own credentials. The handle carries the matching AI Gateway log route
  * for cost accounting, when there is one.
  */
-export function getModel(env: Cloudflare.Env, config: AiModelConfig,
+export function getModel(env: Cloudflare.Env, config: CodexModelConfig,
                          initiator: AiChatAuthorInfo,
                          options: ModelRoutingOptions = {}): ModelHandle {
+  if (config.provider === 'openai-codex') {
+    const model = (OPENAI_CODEX_MODELS as Record<string, Model<Api>>)[config.model];
+    if (!model || !config.codexAuth) throw new Error('Reconnect your ChatGPT / Codex account in Add AI Model.');
+    const source = config.codexAuth;
+    return makeHandle({
+      model: { ...model, baseUrl: 'https://chatgpt.com/backend-api' },
+      apiKey: config.apiToken,
+      sessionAffinity: options.sessionAffinity,
+      // Renew on every HTTP request, including long-running turns and persistent model bindings.
+      fetch: async (input, init) => {
+        const request = new Request(input, init);
+        const url = new URL(request.url);
+        if (url.origin !== 'https://chatgpt.com' || !url.pathname.startsWith('/backend-api/codex/')) {
+          throw new Error('Unexpected Codex endpoint.');
+        }
+        const token = await source.getAccessToken();
+        request.headers.set('Authorization', `Bearer ${token}`);
+        request.headers.set('chatgpt-account-id', codexAccountId(token));
+        const response = await fetch(new Request(request, { redirect: 'manual' }));
+        if (response.status >= 300 && response.status < 400) throw new Error('Unexpected Codex redirect.');
+        return response;
+      },
+    });
+  }
   // BYOK: a connected user's own Cloudflare account pays for everything (all providers, including
   // Workers AI), routed through the user's own AI Gateway with unified billing. Honored regardless
   // of whether a platform AI Gateway is configured, so connected users are always billed correctly.
@@ -639,6 +674,8 @@ function getModelDirect(config: AiModelConfig, sessionAffinity?: string): ModelH
         apiKey: config.apiToken,
         sessionAffinity,
       });
+    case 'openai-codex':
+      throw new Error('Codex requires a connected account.');
     default:
       config.provider satisfies never;
       throw new Error(`Unknown provider "${config.provider}".`);

@@ -387,6 +387,19 @@ export interface AuthenticatedApi extends RpcTarget {
    */
   addModel(profile: AiChatAuthorInfo, config: AiModelConfig): Promise<void>;
 
+  /** Starts a device-code login to the current user's ChatGPT / Codex account. */
+  startCodexLogin(): Promise<CodexLogin>;
+  /** Polls only the current user's named login attempt. */
+  pollCodexLogin(loginId: string): Promise<CodexConnectionStatus>;
+  /** Cancels the current user's named pending login. */
+  cancelCodexLogin(loginId: string): Promise<void>;
+  /** Returns connection state and supported models without credentials. */
+  getCodexConnection(): Promise<CodexConnectionStatus>;
+  /** Adds a catalog model using the current user's connected Codex account. */
+  addCodexModel(modelId: string): Promise<void>;
+  /** Removes the local Codex grant and this user's Codex model entries. */
+  disconnectCodex(): Promise<void>;
+
   /** Deletes a configured model. */
   deleteModel(id: string): Promise<void>;
 
@@ -1132,8 +1145,30 @@ export type CloudflareAccountOption = {
   accountName: string;
 };
 
+/** Public device-login instructions; the device authorization ID stays server-side. */
+export type CodexLogin = {
+  /** Opaque identifier for this user's pending attempt. */
+  loginId: string;
+  /** Short code to enter on OpenAI's authorization page. */
+  userCode: string;
+  /** Fixed OpenAI device authorization page. */
+  verificationUri: string;
+  /** Earliest polling interval, in milliseconds. */
+  intervalMs: number;
+  /** Local expiry timestamp, in milliseconds since the epoch. */
+  expiresAt: number;
+};
+
+/** Non-secret connection state for the authenticated user's Codex account. */
+export type CodexConnectionStatus = {
+  /** Whether a locally stored grant exists. */
+  connected: boolean;
+  /** Models available in the bundled Codex catalog, subject to the user's plan. */
+  models?: { id: string; name: string }[];
+};
+
 /** Supported AI providers. */
-export type AiModelProvider = "openai" | "anthropic" | "google" | "cloudflare" | "ollama";
+export type AiModelProvider = "openai" | "anthropic" | "google" | "cloudflare" | "ollama" | "openai-codex";
 
 /** Information about the AI gateway configuration. Returned by `AuthenticatedApi.getAiConfig()`. */
 export type AiGatewayInfo = {
@@ -1183,6 +1218,7 @@ export const SUGGESTED_MODELS: Record<
   AiModelProvider,
   Record<string, {name: string, contextWindow: number, outputLimit?: number}>
 > = {
+  "openai-codex": {},
   "cloudflare": {
     "@cf/moonshotai/kimi-k2.7-code": {
       name: "Kimi K2.7 Code (Workers AI)", contextWindow: 262144,

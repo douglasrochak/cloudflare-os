@@ -567,3 +567,11 @@ describe("PDF attachment bridging", () => {
     }));
   }, 15000);
 });
+
+// The subscription route must keep its own credentials even when both Cloudflare gateways exist.
+describe('Codex subscription routing', () => {
+  it('requires a server-minted credential source', () => {
+    expect(() => getModel(env(), { provider: 'openai-codex', model: 'gpt-5.3-codex', apiToken: '' }, INITIATOR))
+      .toThrow('Reconnect');
+  });
+});

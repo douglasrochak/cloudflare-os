@@ -52,6 +52,7 @@ export { AdminSettings };
 
 // Re-export entrypoint types from user.ts.
 export { UserDurableObject, GatekeeperConnectCallbackImpl };
+export { CodexTokenSource } from "./user";
 
 // Re-export entrypoint types from overseer.ts.
 export { OverseerDurableObject, GatekeeperLoopback, GatekeeperHookLoopback,
@@ -131,6 +132,12 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
   listModels(): Promise<AiChatAuthorInfo[]> {
     return this.#user.listModels();
   }
+  startCodexLogin() { return this.#user.startCodexLogin(); }
+  pollCodexLogin(loginId: string) { return this.#user.pollCodexLogin(loginId); }
+  cancelCodexLogin(loginId: string) { return this.#user.cancelCodexLogin(loginId); }
+  getCodexConnection() { return this.#user.getCodexConnection(); }
+  addCodexModel(modelId: string) { return this.#user.addCodexModel(modelId); }
+  disconnectCodex() { return this.#user.disconnectCodex(); }
   addModel(profile: AiChatAuthorInfo, config: AiModelConfig): Promise<void> {
     return this.#user.addModel(profile, config);
   }
