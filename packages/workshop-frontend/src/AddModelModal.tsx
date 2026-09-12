@@ -1,3 +1,4 @@
+import CodexConnectionPanel from "./CodexConnectionPanel"
 import { useState, useEffect } from 'react'
 import { Dialog, Button, Input, Select, SensitiveInput, Collapsible, useKumoToastManager } from '@cloudflare/kumo'
 import { AiChatAuthorInfo, AiModelConfig, AiModelProvider, AiGatewayInfo, SUGGESTED_MODELS } from '@gadgets/workshop-shared/api'
@@ -19,6 +20,7 @@ type SelectionType =
 const PROVIDER_LABELS: Record<AiModelProvider, string> = {
   anthropic: 'Anthropic',
   openai: 'OpenAI',
+  'openai-codex': 'ChatGPT / Codex',
   google: 'Google',
   cloudflare: 'Cloudflare Workers AI',
   ollama: 'Ollama',
@@ -28,6 +30,7 @@ const PROVIDER_LABELS: Record<AiModelProvider, string> = {
 const API_TOKEN_PLACEHOLDERS: Record<AiModelProvider, string> = {
   anthropic: 'sk-ant-...',
   openai: 'sk-...',
+  'openai-codex': '',
   google: 'AIza...',
   cloudflare: 'Cloudflare API token',
   ollama: '(optional)',
@@ -66,6 +69,7 @@ function buildOptions(gatewayMode: boolean, enabledProviders: Set<string> | null
   const providerOrder = Object.keys(SUGGESTED_MODELS) as AiModelProvider[]
 
   for (const provider of providerOrder) {
+    if (provider === "openai-codex") continue
     if (enabledProviders && !enabledProviders.has(provider)) continue
 
     // In gateway mode, suggested models are already built-in, so don't list them.
@@ -93,6 +97,7 @@ export default function AddModelModal({ visible, onCancel, onSuccess, authentica
   const toasts = useKumoToastManager()
 
   const [loading, setLoading] = useState(false)
+  const [codexMode, setCodexMode] = useState(false)
   const [selection, setSelection] = useState<SelectionType | null>(null)
   const [selectValue, setSelectValue] = useState<string | undefined>(undefined)
 
@@ -117,6 +122,7 @@ export default function AddModelModal({ visible, onCancel, onSuccess, authentica
   // Reset all state when dialog closes
   useEffect(() => {
     if (!visible) {
+      setCodexMode(false)
       setSelection(null)
       setSelectValue(undefined)
       setModelId('')
@@ -235,10 +241,15 @@ export default function AddModelModal({ visible, onCancel, onSuccess, authentica
     <Dialog.Root open={visible} onOpenChange={(open) => { if (!open) onCancel() }}>
       <Dialog className="p-6" size="lg">
         <Dialog.Title className="text-lg font-semibold mb-4">
-          Add AI Model
+          {codexMode ? 'Connect ChatGPT / Codex' : 'Add AI Model'}
         </Dialog.Title>
 
+        {codexMode ? <CodexConnectionPanel api={authenticatedApi} onSuccess={onSuccess}
+          onBack={() => setCodexMode(false)} /> : <>
         <div className="space-y-4">
+          <Button variant="secondary" className="w-full" onClick={() => setCodexMode(true)}>
+            Connect ChatGPT / Codex
+          </Button>
           {/* Model / Provider selection */}
           <Select
             label={gatewayMode ? 'Select Provider' : 'Select Model'}
@@ -375,6 +386,7 @@ export default function AddModelModal({ visible, onCancel, onSuccess, authentica
             Add Model
           </Button>
         </div>
+        </>}
       </Dialog>
     </Dialog.Root>
   )
